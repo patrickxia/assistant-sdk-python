@@ -41,13 +41,15 @@ try:
         assistant_helpers,
         audio_helpers,
         browser_helpers,
-        device_helpers
+        device_helpers,
+        text_helpers
     )
 except (SystemError, ImportError):
     import assistant_helpers
     import audio_helpers
     import browser_helpers
     import device_helpers
+    import text_helpers
 
 
 ASSISTANT_API_ENDPOINT = 'embeddedassistant.googleapis.com'
@@ -256,6 +258,10 @@ class SampleAssistant(object):
               help='Enable visual display of Assistant responses in HTML.')
 @click.option('--verbose', '-v', is_flag=True, default=False,
               help='Verbose logging.')
+@click.option('--use-text-input', is_flag=True, default=False,
+              help='Use the hacky text-to-speech stuff.')
+@click.option('--use-text-output', is_flag=True, default=False,
+              help='Use the hacky speech-to-text stuff.')
 @click.option('--input-audio-file', '-i',
               metavar='<input file>',
               help='Path to input audio file. '
@@ -293,7 +299,8 @@ class SampleAssistant(object):
               help='Force termination after a single conversation.')
 def main(api_endpoint, credentials, project_id,
          device_model_id, device_id, device_config,
-         lang, display, verbose,
+         lang, display, verbose, use_text_input,
+         use_text_output,
          input_audio_file, output_audio_file,
          audio_sample_rate, audio_sample_width,
          audio_iter_size, audio_block_size, audio_flush_size,
@@ -336,7 +343,13 @@ def main(api_endpoint, credentials, project_id,
 
     # Configure audio source and sink.
     audio_device = None
-    if input_audio_file:
+    if use_text_input:
+        audio_source = text_helpers.TextSource(
+            "",
+            sample_rate=audio_sample_rate,
+            sample_width=audio_sample_width
+        )
+    elif input_audio_file:
         audio_source = audio_helpers.WaveSource(
             open(input_audio_file, 'rb'),
             sample_rate=audio_sample_rate,
@@ -351,7 +364,13 @@ def main(api_endpoint, credentials, project_id,
                 flush_size=audio_flush_size
             )
         )
-    if output_audio_file:
+
+    if use_text_output:
+        audio_sink = text_helpers.TextSink(
+            sample_rate=audio_sample_rate,
+            sample_width=audio_sample_width
+        )
+    elif output_audio_file:
         audio_sink = audio_helpers.WaveSink(
             open(output_audio_file, 'wb'),
             sample_rate=audio_sample_rate,
@@ -452,8 +471,15 @@ def main(api_endpoint, credentials, project_id,
         # and playing back assistant response using the speaker.
         # When the once flag is set, don't wait for a trigger. Otherwise, wait.
         wait_for_user_trigger = not once
+        first = True
         while True:
-            if wait_for_user_trigger:
+            if use_text_input:
+                if not first and use_text_output:
+                    logging.info('Recognized response from Assistant: ' + audio_sink.recognize())
+                    audio_sink.reset()
+                audio_source.reset_text(click.prompt(''))
+                first = False
+            elif wait_for_user_trigger:
                 click.pause(info='Press Enter to send a new request...')
             continue_conversation = assistant.assist()
             # wait for user trigger if there is no follow-up turn in
